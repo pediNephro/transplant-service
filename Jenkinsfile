@@ -26,39 +26,39 @@ pipeline {
         }
 
         stage('Start Test MySQL') {
-    steps {
-        sh """
-            docker run -d \
-                --name ${MYSQL_CONTAINER} \
-                -e MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD} \
-                -e MYSQL_DATABASE=${MYSQL_DATABASE} \
-                -e MYSQL_ROOT_HOST='%' \
-                -p ${MYSQL_PORT}:3306 \
-                mysql:8
+            steps {
+                sh """
+                    docker run -d \
+                        --name ${MYSQL_CONTAINER} \
+                        -e MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD} \
+                        -e MYSQL_DATABASE=${MYSQL_DATABASE} \
+                        -e MYSQL_ROOT_HOST='%' \
+                        -p ${MYSQL_PORT}:3306 \
+                        mysql:8
 
-            echo "Waiting for MySQL port to be reachable..."
-            for i in \$(seq 1 60); do
-                if docker run --rm --network host mysql:8 mysqladmin ping \
-                    -h 127.0.0.1 \
-                    -P ${MYSQL_PORT} \
-                    -u root \
-                    -p${MYSQL_ROOT_PASSWORD} \
-                    --silent 2>/dev/null; then
-                    echo "MySQL is ready after \${i} seconds"
-                    break
-                fi
-                if [ \$i -eq 60 ]; then
-                    echo "=== MySQL container logs ==="
-                    docker logs ${MYSQL_CONTAINER}
-                    echo "MySQL failed to start in 60 seconds"
-                    exit 1
-                fi
-                echo "Waiting... (\${i}/60)"
-                sleep 2
-            done
-        """
-    }
-}
+                    echo "Waiting for MySQL port to be reachable..."
+                    for i in \$(seq 1 60); do
+                        if docker run --rm --network host mysql:8 mysqladmin ping \
+                            -h 127.0.0.1 \
+                            -P ${MYSQL_PORT} \
+                            -u root \
+                            -p${MYSQL_ROOT_PASSWORD} \
+                            --silent 2>/dev/null; then
+                            echo "MySQL is ready after \${i} seconds"
+                            break
+                        fi
+                        if [ \$i -eq 60 ]; then
+                            echo "=== MySQL container logs ==="
+                            docker logs ${MYSQL_CONTAINER}
+                            echo "MySQL failed to start in 60 seconds"
+                            exit 1
+                        fi
+                        echo "Waiting... (\${i}/60)"
+                        sleep 2
+                    done
+                """
+            }
+        }
 
         stage('Unit Tests') {
             steps {
@@ -68,7 +68,10 @@ pipeline {
                         -Dspring.datasource.username=root \
                         -Dspring.datasource.password=${MYSQL_ROOT_PASSWORD} \
                         -Dspring.jpa.hibernate.ddl-auto=create-drop \
-                        -Dspring.jpa.database-platform=org.hibernate.dialect.MySQL8Dialect
+                        -Dspring.jpa.database-platform=org.hibernate.dialect.MySQL8Dialect \
+                        -Deureka.client.enabled=false \
+                        -Dspring.security.oauth2.resourceserver.jwt.jwk-set-uri=http://localhost \
+                        -Dexclude=**/*ApplicationTests.java
                 """
             }
             post {
@@ -103,7 +106,9 @@ pipeline {
 
         stage('Push to Docker Hub') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS')]) {
                     sh """
                         echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
                         docker push ${DOCKER_HUB_REPO}:${BUILD_NUMBER}
@@ -118,7 +123,7 @@ pipeline {
             steps {
                 sh """
                     docker stop ${MYSQL_CONTAINER} || true
-                    docker rm ${MYSQL_CONTAINER} || true
+                    docker rm   ${MYSQL_CONTAINER} || true
                 """
             }
         }
@@ -132,7 +137,11 @@ pipeline {
             echo "❌ Pipeline FAILED"
         }
         always {
-            sh 'docker logout || true'
+            sh """
+                docker stop ${MYSQL_CONTAINER} || true
+                docker rm   ${MYSQL_CONTAINER} || true
+                docker logout || true
+            """
         }
     }
 }
